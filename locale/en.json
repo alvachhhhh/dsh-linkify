@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Linkify",
+    "description": "Render [label](https://…) and bare https://… URLs in your own chat messages as clickable links."
+  }
+}

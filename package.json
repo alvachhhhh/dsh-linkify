@@ -1,0 +1,44 @@
+{
+  "name": "dsh-linkify",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Clickable links in your own chat messages: [label](https://…) and bare https://… URLs render as links.",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  },
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "links",
+    "markdown",
+    "chat"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

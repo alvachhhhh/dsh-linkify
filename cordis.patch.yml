@@ -1,0 +1,5 @@
+# dsh-linkify bundle patch: a client-only row that adds link rendering to
+# user-authored chat text.
+- insert:
+    - id: linkify
+      name: dsh-linkify
