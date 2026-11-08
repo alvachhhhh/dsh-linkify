@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 const clicks = [];
 const pasted = [];
@@ -38,6 +39,10 @@ plugin.apply({
 });
 
 assert.equal(rule.id, 'link');
+
+// The manifest must declare the DSH runtime it is registered against, or the manager installs it blind.
+const manifest = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
+assert.equal(manifest.engines?.dsh, '^0.2.2-0', 'package.json declares engines.dsh');
 assert.equal(rule.order, 20);
 
 const cases = [

@@ -13,6 +13,10 @@ It also fixes a real problem: when you copy link-bearing text from a browser or 
 - The composer itself still shows markdown source — DSH's composer is a plain-text editor and cannot render links in place
 - Links in assistant replies are native DSH markdown and unrelated to this plugin
 
+## Compatibility
+
+Requires DSH `0.2.2` or newer (`engines.dsh: ^0.2.2-0`). The plugin uses the `conversation.user.text.node` slot, the `uiConversation.userText` rule API and the `sidebarRight` browser tab, all available since `0.2.2`.
+
 ## Install
 
 The plugin is a standard DSH bundle (`dsh.bundle` + `dsh.client` in `package.json`). The DSH marketplace cannot install a local `link:` package (pnpm re-resolves the `@deepseek-ai/dsh-*` dependency ranges against the registry), so link it by hand:
