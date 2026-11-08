@@ -228,6 +228,44 @@ window.__ModuleLoader__.load({
     const fieldToAnchor = ({ url, label }) =>
       `<a href="${url.replace(/"/g, '&quot;')}">${label.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</a>`;
 
+    // Labels copied from a page usually end up as one separator-joined run ("招生｜课程｜费用"),
+    // not as prose. Searching for each label's first occurrence in order would then spend the
+    // links on the same words inside the sentences ("申请资格", "毕业项目") and leave the run bare,
+    // so a run of consecutive anchors is matched as a whole first.
+    const RUN_SEP = /\s*[|｜/／、,，·・]\s*/u;
+
+    // A part of the text that starts exactly at `at` with one of the candidates.
+    function matchAt(text, candidates, at) {
+      for (const candidate of candidates) {
+        if (text.startsWith(candidate, at) && !cutsWord(text, at, candidate)) return candidate;
+      }
+      return undefined;
+    }
+
+    // Consecutive anchors whose labels sit in `text` joined only by separators, from `from`.
+    // Every occurrence of the first label is tried, because the run is rarely its first one.
+    function runFrom(text, entries, start, from) {
+      const candidates = labelCandidates(entries[start].label);
+      for (const candidate of candidates) {
+        for (let at = findLabel(text, candidate, from); at !== -1; at = findLabel(text, candidate, at + 1)) {
+          if (cutsWord(text, at, candidate)) continue;
+          const parts = [{ index: start, at, candidate }];
+          let end = at + candidate.length;
+          for (let i = start + 1; i < entries.length; i++) {
+            const sep = RUN_SEP.exec(text.slice(end, end + 4));
+            if (sep === null || sep.index !== 0) break;
+            const next = end + sep[0].length;
+            const label = matchAt(text, labelCandidates(entries[i].label), next);
+            if (label === undefined) break;
+            parts.push({ index: i, at: next, candidate: label });
+            end = next + label.length;
+          }
+          if (parts.length > 1) return parts;
+        }
+      }
+      return undefined;
+    }
+
     // Plain clipboard text + the anchors of its HTML twin → text whose linked labels became
     // [label](url). Returns undefined when there is nothing to re-attach.
     function linkifyPlain(plain, html) {
@@ -235,6 +273,7 @@ window.__ModuleLoader__.load({
       let text = plain;
       let cursor = 0;
       let changed = false;
+      const entries = [];
       for (const [, attrs, inner] of html.matchAll(ANCHOR)) {
         const href = HREF.exec(attrs);
         if (href === null) continue;
@@ -244,18 +283,34 @@ window.__ModuleLoader__.load({
         const attr = LABEL_ATTR.exec(attrs) || LABEL_ATTR.exec(inner);
         const label = anchorLabel(inner) || (attr === null ? '' : anchorLabel(attr[1]));
         if (label === '' || label === url || label.length > 300) continue;
+        entries.push({ url, label });
+      }
+      const skip = new Set();
+      for (let i = 0; i < entries.length; i++) {
+        if (skip.has(i)) continue;
         // Anchors and their labels come in document order, and "官网"-style labels repeat, so
         // search from the previous insertion; a label that only occurs earlier is a fallback.
-        const candidates = labelCandidates(label);
-        const pick = (from) =>
-          candidates
-            .map((candidate) => ({ candidate, at: findLabel(text, candidate, from) }))
-            .find(({ candidate, at }) => at !== -1 && !cutsWord(text, at, candidate));
-        const hit = pick(cursor) ?? pick(0);
-        if (hit === undefined) continue;
-        const markdown = `[${hit.candidate}](${url})`;
-        text = text.slice(0, hit.at) + markdown + text.slice(hit.at + hit.candidate.length);
-        cursor = hit.at + markdown.length;
+        const run = runFrom(text, entries, i, cursor);
+        const hit = run === undefined
+          ? (() => {
+              const candidates = labelCandidates(entries[i].label);
+              const pick = (from) =>
+                candidates
+                  .map((candidate) => ({ candidate, at: findLabel(text, candidate, from) }))
+                  .find(({ candidate, at }) => at !== -1 && !cutsWord(text, at, candidate));
+              return pick(cursor) ?? pick(0);
+            })()
+          : undefined;
+        const parts = run ?? (hit === undefined ? [] : [{ index: i, at: hit.at, candidate: hit.candidate }]);
+        if (parts.length === 0) continue;
+        // Right to left, so the earlier offsets stay valid.
+        for (const part of [...parts].reverse()) {
+          const url = entries[part.index].url;
+          text = text.slice(0, part.at) + `[${part.candidate}](${url})` + text.slice(part.at + part.candidate.length);
+        }
+        const last = parts[parts.length - 1];
+        cursor = last.at + `[${last.candidate}](${entries[last.index].url})`.length;
+        for (const part of parts) skip.add(part.index);
         changed = true;
       }
       return changed ? text : undefined;

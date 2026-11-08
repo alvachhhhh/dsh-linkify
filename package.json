@@ -1,6 +1,6 @@
 {
   "name": "dsh-linkify",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "description": "Clickable links in your own chat messages: [label](https://…) and bare https://… URLs render as links.",
   "main": "./index.js",

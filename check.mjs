@@ -40,6 +40,28 @@ plugin.apply({
 
 assert.equal(rule.id, 'link');
 
+// A separator-joined run carries the links; the same words inside the sentences must stay plain.
+{
+  const plain = [
+    '- 漏大四毕业项目：至少 25 分钟音乐须公开呈现并录音。',
+    '- 官网对高中应届生申请资格有冲突：资格页允许应届，FAQ 却写申请时须高中毕业。项目｜资格｜FAQ',
+    '- 专业主页仍保留旧版要求。项目｜当前申请要求',
+  ].join('\n');
+  const html = [
+    '<a href="https://e.test/comp"><span><span>项目</span></span></a>',
+    '<a href="https://e.test/qual"><span><span>资格</span></span></a>',
+    '<a href="https://e.test/faq"><span><span>FAQ</span></span></a>',
+    '<a href="https://e.test/audio"><span><span>项目</span></span></a>',
+    '<a href="https://e.test/req"><span><span>当前申请要求</span></span></a>',
+  ].join('');
+  const out = plugin.linkifyPlain(plain, html);
+  assert.ok(out?.includes('毕业项目：'), 'prose 项目 stays plain');
+  assert.ok(out?.includes('申请资格有冲突：资格页'), 'prose 资格 stays plain');
+  assert.ok(out?.includes('FAQ 却写'), 'prose FAQ stays plain');
+  assert.ok(out?.includes('[项目](https://e.test/comp)｜[资格](https://e.test/qual)｜[FAQ](https://e.test/faq)'), 'run linked in order');
+  assert.ok(out?.includes('[项目](https://e.test/audio)｜[当前申请要求](https://e.test/req)'), 'second run linked');
+}
+
 // The manifest must declare the DSH runtime it is registered against, or the manager installs it blind.
 const manifest = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 assert.equal(manifest.engines?.dsh, '^0.2.2-0', 'package.json declares engines.dsh');
