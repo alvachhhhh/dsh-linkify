@@ -13,6 +13,10 @@
 - 输入框本身仍显示 markdown 源码——DSH 的输入框是纯文本编辑器，无法在其中渲染链接
 - 助手回答里的链接是 DSH 原生 markdown，与本插件无关
 
+## 兼容性
+
+需要 DSH `0.2.2` 及以上（`engines.dsh: ^0.2.2-0`）。插件依赖 `conversation.user.text.node` 槽位、`uiConversation.userText` 规则接口和 `sidebarRight` 浏览器页签，这三者自 `0.2.2` 起可用。版本不满足时 DSH 会拒绝安装或启用。
+
 ## 安装
 
 插件是标准的 DSH bundle（`package.json` 里的 `dsh.bundle` + `dsh.client`）。DSH 插件市场装 `link:` 本地包会失败（pnpm 会去 registry 重新解析 `@deepseek-ai/dsh-*` 依赖范围），所以手工 link：
