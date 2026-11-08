@@ -39,10 +39,12 @@ window.__ModuleLoader__.load({
       match(text, from) {
         MARKDOWN_LINK.lastIndex = from;
         const markdown = MARKDOWN_LINK.exec(text);
-        BARE_URL.lastIndex = from;
-        const bare = BARE_URL.exec(text);
         const markdownStart = markdown === null ? Infinity : markdown.index;
-        if (bare !== null && bare.index < markdownStart) {
+        // A bare URL trimmed down to a scheme is not a link; keep scanning instead of
+        // reporting "no link here" and dropping every later link in the same text.
+        BARE_URL.lastIndex = from;
+        for (let bare; (bare = BARE_URL.exec(text)) !== null; ) {
+          if (bare.index > markdownStart) break;
           const url = trimUrl(bare[0]);
           if (url.length > 'https://'.length) {
             return { id: 'link', start: bare.index, end: bare.index + url.length, data: { href: url, label: url } };
@@ -73,7 +75,10 @@ window.__ModuleLoader__.load({
     // The composer is a Lexical plain-text editor: it pastes text/plain only, so every href is
     // dropped — yet the clipboard's text/html still carries them. Keep the pasted text exactly
     // as copied (bullets, line breaks, one copy) and only re-attach its links as markdown.
-    const ANCHOR = /<a\b[^>]*?href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    const ANCHOR = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+    const HREF = /\shref\s*=\s*["']([^"']+)["']/i;
+    // Icon/image links have no text: their label lives in alt, aria-label or title.
+    const LABEL_ATTR = /\s(?:aria-label|alt|title)\s*=\s*["']([^"']*)["']/i;
     const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", nbsp: ' ' };
     // Named entities plus numeric ones: pages often serialise Chinese as &#23448;&#32593;.
     const decodeEntities = (text) =>
@@ -86,6 +91,27 @@ window.__ModuleLoader__.load({
     const stripTags = (text) => text.replace(/<[^>]*>/g, '');
     const anchorLabel = (inner) =>
       decodeEntities(stripTags(inner)).replace(/\s+/g, ' ').trim().replace(/\]/g, ')');
+
+    // Where a visible label ends before hidden a11y text ("Programme (opens in new tab)").
+    const LABEL_STOP = /[\s(（\[【〔〈《"“'‘|·・/／\\,，、;；:：–—]/u;
+    const ASCII_WORD = /[A-Za-z0-9]/;
+
+    // The anchor label, longest first, then the same label cut before hidden extra text.
+    function labelCandidates(label) {
+      const out = [label];
+      for (let i = label.length - 1; i > 1; i--) {
+        if (!LABEL_STOP.test(label[i])) continue;
+        const head = label.slice(0, i).trim();
+        if (head.length >= 2 && !out.includes(head)) out.push(head);
+      }
+      return out;
+    }
+
+    // A trimmed candidate must not match the head of a longer word ("Pr" in "Programme").
+    function cutsWord(text, at, candidate) {
+      if (!ASCII_WORD.test(candidate[candidate.length - 1])) return false;
+      return ASCII_WORD.test(text[at + candidate.length] || '');
+    }
 
     // First occurrence of `label` that is not already inside a markdown link.
     function findLabel(text, label, from = 0) {
@@ -103,14 +129,20 @@ window.__ModuleLoader__.load({
       if (plain === '' || !/<a\b[^>]*href/iu.test(html)) return undefined;
       let text = plain;
       let changed = false;
-      for (const [, rawHref, inner] of html.matchAll(ANCHOR)) {
-        const url = decodeEntities(rawHref.trim());
+      for (const [, attrs, inner] of html.matchAll(ANCHOR)) {
+        const href = HREF.exec(attrs);
+        if (href === null) continue;
+        const url = decodeEntities(href[1].trim());
         if (!/^https?:\/\//i.test(url)) continue;
-        const label = anchorLabel(inner);
+        // Icon links: the label lives in alt/title/aria-label, on the <a> or on the <img> inside it.
+        const attr = LABEL_ATTR.exec(attrs) || LABEL_ATTR.exec(inner);
+        const label = anchorLabel(inner) || (attr === null ? '' : anchorLabel(attr[1]));
         if (label === '' || label === url || label.length > 300) continue;
-        const at = findLabel(text, label);
-        if (at === -1) continue;
-        text = `${text.slice(0, at)}[${label}](${url})${text.slice(at + label.length)}`;
+        const hit = labelCandidates(label)
+          .map((candidate) => ({ candidate, at: findLabel(text, candidate) }))
+          .find(({ candidate, at }) => at !== -1 && !cutsWord(text, at, candidate));
+        if (hit === undefined) continue;
+        text = `${text.slice(0, hit.at)}[${hit.candidate}](${url})${text.slice(hit.at + hit.candidate.length)}`;
         changed = true;
       }
       return changed ? text : undefined;

@@ -79,6 +79,27 @@ assert.equal(conv('no anchors', '<p>no anchors</p>'), undefined);
 assert.equal(conv('rel', '<a href="/relative">rel</a>'), undefined);
 assert.equal(conv('别的文字', '<a href="https://example.com">官网</a>'), undefined);
 
+// Hidden a11y text inside an anchor, and icon links with only an alt label, still link.
+assert.equal(
+  conv('Programme\nFees\nContact us', '<a href="https://e.test/1">Programme <span class="sr">(opens in new tab)</span></a>\n' +
+    '<a href="https://e.test/2">Fees<span class="vh">（在新窗口打开）</span></a>\n' +
+    '<a href="https://e.test/3"><img alt="Contact us" src="i.png"></a>'),
+  '[Programme](https://e.test/1)\n[Fees](https://e.test/2)\n[Contact us](https://e.test/3)',
+);
+// A short label must not be matched into the middle of a longer word.
+assert.equal(conv('Programming', '<a href="https://e.test/1">Prog <span>(more)</span></a>'), undefined);
+// Every link in a long paste is linked, not just the first few.
+const many = Array.from({ length: 12 }, (_, i) => `链接${i}`).join('\n');
+const manyHtml = Array.from({ length: 12 }, (_, i) => `<a href="https://e.test/${i}">链接${i}<span class="vh"> (新窗口)</span></a>`).join('\n');
+assert.equal(
+  conv(many, manyHtml),
+  Array.from({ length: 12 }, (_, i) => `[链接${i}](https://e.test/${i})`).join('\n'),
+);
+// A degenerate bare URL earlier in the text must not swallow the links after it.
+const degenerate = 'https:// 之后 [官网](https://example.com/a)';
+const after = rule.match(degenerate, 0);
+assert.equal(after.data.href, 'https://example.com/a');
+
 // A pasted link is handed to the editor exactly once: the native paste is cancelled and a
 // single synthetic paste carrying the markdown is replayed (no duplicated line).
 globalThis.DataTransfer = class {
