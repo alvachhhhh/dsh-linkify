@@ -44,7 +44,8 @@ const cases = [
   ['see https://example.com/a?b=1. next', 'https://example.com/a?b=1', 'https://example.com/a?b=1'],
   ['[Docs](https://example.com/docs)', 'Docs', 'https://example.com/docs'],
   ['(https://example.com/x) tail', 'https://example.com/x', 'https://example.com/x'],
-  ['链接 https://example.com/路径。', 'https://example.com/路径', 'https://example.com/路径'],
+  // Raw CJK ends a bare URL: prose glue is far more common than unencoded CJK paths.
+  ['链接 https://example.com/路径。', 'https://example.com/', 'https://example.com/'],
 ];
 for (const [text, label, href] of cases) {
   const node = rule.match(text, 0);
@@ -166,6 +167,13 @@ const text = 'a https://one.test b https://two.test';
 const first = rule.match(text, 0);
 assert.equal(first.data.href, 'https://one.test');
 assert.equal(rule.match(text, first.end).data.href, 'https://two.test');
+
+// Chinese prose glued straight onto a URL stays prose: it must not enter the href.
+const glued = '见 https://e.test/a现允许 GPA 3.0，另有 https://e.test/b明确不接受。';
+const gluedFirst = rule.match(glued, 0);
+assert.equal(gluedFirst.data.href, 'https://e.test/a');
+assert.equal(glued.slice(gluedFirst.start, gluedFirst.end), 'https://e.test/a');
+assert.equal(rule.match(glued, gluedFirst.end).data.href, 'https://e.test/b');
 
 const node = { data: { href: 'https://x.test', label: 'X' } };
 const render = () => LinkText({ node, raw: '[X](https://x.test)', openExternal: (u) => clicks.push(u) });

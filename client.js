@@ -6,8 +6,10 @@ window.__ModuleLoader__.load({
 
     // Markdown link: [label](https://…). The label is the visible text.
     const MARKDOWN_LINK = /\[([^\]\n]{1,300})\]\((https?:\/\/(?:[^\s()]|\([^\s()]*\))+)\)/gu;
-    // Bare URL: https://… — stops at whitespace, quotes and angle brackets.
-    const BARE_URL = /https?:\/\/[^\s<>"'`]+/gu;
+    // Bare URL: https://… — stops at whitespace, quotes, angle brackets and CJK. A URL glued to
+    // the next sentence ("…/how-to-apply/现允许") would otherwise swallow the prose into the href.
+    // ponytail: raw CJK inside a URL (unencoded wiki links) is cut too; copy-link encodes it.
+    const BARE_URL = /https?:\/\/[^\s<>"'`\u3000-\u303f\u3400-\u9fff\uf900-\ufaff\uff00-\uffef]+/gu;
     const TRAILING_PUNCTUATION = '.,;:!?。，、；：！？';
 
     // Drop sentence punctuation and an unbalanced closing paren from a bare URL.
