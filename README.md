@@ -1,43 +1,45 @@
 # dsh-linkify
 
-给 DeepSeek Harness（DSH）客户端加超链接：你在输入框里发的 `[文字](https://…)` 或裸 `https://…` 链接，在自己发出的消息气泡里显示成可点击的文字链接，点击走 DSH 的内置浏览器标签页（没有则 `window.open`）。
+**English** · [简体中文](README.zh-CN.md)
 
-另外它修了一个实际问题：从浏览器/微信复制带链接的文字粘进 DSH 时，富文本里的 `href` 会被丢弃，只剩文字。安装后粘贴会自动转成 `[文字](url)`，链接才保得住。
+Clickable links in your own chat messages for the DeepSeek Harness (DSH) client: text you send as `[label](https://…)` or a bare `https://…` URL renders as a clickable link inside your own message bubble. Clicks open the built-in browser tab (or `window.open` when that tab is unavailable).
 
-## 行为
+It also fixes a real problem: when you copy link-bearing text from a browser or a chat app into DSH, the rich text's `href` is dropped and only the label survives. With this plugin, pasting converts it to `[label](url)`, so the link survives.
 
-- 用户消息里的 `[文字](https://…)`、裸 `https://…` → 下划线的可点击链接
-- 从浏览器复制带超链接的文字 → 粘贴时自动转成 `[文字](url)` 再进输入框（只插入一份）
-- 输入框本身仍显示 markdown 源码——DSH 的输入框是纯文本编辑器，无法在其中渲染链接
-- 助手回答里的链接是 DSH 原生 markdown，与本插件无关
+## What it does
 
-## 安装
+- `[label](https://…)` and bare `https://…` in a user message → underlined, clickable link
+- Pasting rich text with hyperlinks → converted to `[label](url)` on the way into the composer (inserted exactly once)
+- The composer itself still shows markdown source — DSH's composer is a plain-text editor and cannot render links in place
+- Links in assistant replies are native DSH markdown and unrelated to this plugin
 
-插件是标准的 DSH bundle（`package.json` 里的 `dsh.bundle` + `dsh.client`）。DSH 插件市场装 `link:` 本地包会失败（pnpm 会去 registry 重新解析 `@deepseek-ai/dsh-*` 依赖范围），所以手工 link：
+## Install
+
+The plugin is a standard DSH bundle (`dsh.bundle` + `dsh.client` in `package.json`). The DSH marketplace cannot install a local `link:` package (pnpm re-resolves the `@deepseek-ai/dsh-*` dependency ranges against the registry), so link it by hand:
 
 ```bash
 git clone https://github.com/alvachhhhh/dsh-linkify.git ~/Projects/dsh-linkify
 
-P=~/.dsh/profiles/desktop          # 换成你实际使用的 profile
+P=~/.dsh/profiles/desktop          # use the profile you actually run
 mkdir -p "$P/node_modules"
 ln -sfn ~/Projects/dsh-linkify "$P/node_modules/dsh-linkify"
 
-# 1) 依赖里登记
+# 1) declare the dependency
 #    package.json -> dependencies: "dsh-linkify": "link:/Users/you/Projects/dsh-linkify"
-# 2) bundle 清单里登记
-#    package.json -> dsh.profile.bundles 数组加上 "dsh-linkify"
+# 2) add it to the bundle list
+#    package.json -> dsh.profile.bundles: add "dsh-linkify"
 ```
 
-改完重启 DSH Desktop。卸载就是把上面两处删掉再重启。
+Restart DSH Desktop after editing. To uninstall, remove both entries and restart.
 
-## 开发
+## Development
 
 ```bash
 node --check client.js
-node check.mjs     # 自带断言，不依赖测试框架
+node check.mjs     # asserts, no test framework
 ```
 
-`check.mjs` 会核对规则匹配、粘贴转换、粘贴监听器和渲染器点击行为。
+`check.mjs` covers rule matching, paste conversion, the paste listener, and the renderer's click behaviour.
 
 ## License
 
