@@ -125,11 +125,115 @@ window.__ModuleLoader__.load({
       return -1;
     }
 
+    // Native apps (TextEdit, Pages, Word, Mail) put RTF on the clipboard instead of HTML, and
+    // keep each hyperlink as {\\field{\\*\\fldinst{HYPERLINK "url"}}{\\fldrslt label}}. The plain
+    // flavour keeps only the label, so those links must be re-attached from the RTF side.
+    const RTF_CODEPAGES = { 936: 'gbk', 950: 'big5', 1252: 'windows-1252', 65001: 'utf-8' };
+    const RTF_HREF = /HYPERLINK\s+"([^"\\]+)"/g;
+
+    // RTF text run → plain text: \uN is a decimal UTF-16 unit, \'hh a byte in \ansicpg,
+    // control words and groups carry no text.
+    function rtfText(source, codepage) {
+      const decoder = new TextDecoder(RTF_CODEPAGES[codepage] || 'windows-1252');
+      let out = '';
+      let bytes = [];
+      let skip = 1;
+      const flush = () => {
+        if (bytes.length > 0) {
+          out += decoder.decode(new Uint8Array(bytes));
+          bytes = [];
+        }
+      };
+      for (let i = 0; i < source.length; ) {
+        const ch = source[i];
+        if (ch === '\\') {
+          const next = source[i + 1];
+          if (next === "'") {
+            bytes.push(parseInt(source.slice(i + 2, i + 4), 16));
+            i += 4;
+            continue;
+          }
+          if (next === '\\' || next === '{' || next === '}') {
+            flush();
+            out += next;
+            i += 2;
+            continue;
+          }
+          const word = /^\\([a-zA-Z]+)(-?\d+)? ?/.exec(source.slice(i));
+          if (word === null) {
+            i += 2;
+            continue;
+          }
+          flush();
+          if (word[1] === 'u') {
+            let code = Number(word[2]);
+            if (code < 0) code += 65536;
+            out += String.fromCharCode(code);
+            i += word[0].length;
+            // \ucN fallback characters follow each \uN outside of \uc0 runs.
+            for (let n = 0; n < skip && i < source.length; n++) i += source[i] === '\\' ? 2 : 1;
+            continue;
+          }
+          if (word[1] === 'uc') skip = Number(word[2] || 1);
+          else if (word[1] === 'par' || word[1] === 'line') out += '\n';
+          else if (word[1] === 'tab') out += '\t';
+          i += word[0].length;
+          continue;
+        }
+        if (ch === '{' || ch === '}') {
+          flush();
+          i++;
+          continue;
+        }
+        flush();
+        out += ch;
+        i++;
+      }
+      flush();
+      return out;
+    }
+
+    // The text after \fldrslt, up to the closing brace of its destination group.
+    function rtfRun(rtf, start) {
+      let depth = 0;
+      for (let i = start; i < rtf.length; i++) {
+        if (rtf[i] === '\\') {
+          i++;
+          continue;
+        }
+        if (rtf[i] === '{') depth++;
+        else if (rtf[i] === '}') {
+          if (depth === 0) return rtf.slice(start, i);
+          depth--;
+        }
+      }
+      return rtf.slice(start);
+    }
+
+    // Hyperlinks of an RTF clipboard flavour, in document order.
+    function rtfLinks(rtf) {
+      const codepage = Number((/\\ansicpg(\d+)/.exec(rtf) || [])[1] || 1252);
+      const links = [];
+      for (const match of rtf.matchAll(RTF_HREF)) {
+        const field = rtf.indexOf('\\fldrslt', match.index);
+        if (field === -1) continue;
+        let start = field + '\\fldrslt'.length;
+        while (rtf[start] === ' ') start++;
+        const label = rtfText(rtfRun(rtf, start), codepage).replace(/\s+/g, ' ').trim();
+        if (label !== '') links.push({ url: match[1].trim(), label });
+      }
+      return links;
+    }
+
+    const fieldToAnchor = ({ url, label }) =>
+      `<a href="${url.replace(/"/g, '&quot;')}">${label.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</a>`;
+
     // Plain clipboard text + the anchors of its HTML twin → text whose linked labels became
     // [label](url). Returns undefined when there is nothing to re-attach.
     function linkifyPlain(plain, html) {
       if (plain === '' || !/<a\b[^>]*href/iu.test(html)) return undefined;
       let text = plain;
+      let cursor = 0;
       let changed = false;
       for (const [, attrs, inner] of html.matchAll(ANCHOR)) {
         const href = HREF.exec(attrs);
@@ -140,11 +244,18 @@ window.__ModuleLoader__.load({
         const attr = LABEL_ATTR.exec(attrs) || LABEL_ATTR.exec(inner);
         const label = anchorLabel(inner) || (attr === null ? '' : anchorLabel(attr[1]));
         if (label === '' || label === url || label.length > 300) continue;
-        const hit = labelCandidates(label)
-          .map((candidate) => ({ candidate, at: findLabel(text, candidate) }))
-          .find(({ candidate, at }) => at !== -1 && !cutsWord(text, at, candidate));
+        // Anchors and their labels come in document order, and "官网"-style labels repeat, so
+        // search from the previous insertion; a label that only occurs earlier is a fallback.
+        const candidates = labelCandidates(label);
+        const pick = (from) =>
+          candidates
+            .map((candidate) => ({ candidate, at: findLabel(text, candidate, from) }))
+            .find(({ candidate, at }) => at !== -1 && !cutsWord(text, at, candidate));
+        const hit = pick(cursor) ?? pick(0);
         if (hit === undefined) continue;
-        text = `${text.slice(0, hit.at)}[${hit.candidate}](${url})${text.slice(hit.at + hit.candidate.length)}`;
+        const markdown = `[${hit.candidate}](${url})`;
+        text = text.slice(0, hit.at) + markdown + text.slice(hit.at + hit.candidate.length);
+        cursor = hit.at + markdown.length;
         changed = true;
       }
       return changed ? text : undefined;
@@ -174,7 +285,12 @@ window.__ModuleLoader__.load({
           target instanceof HTMLElement &&
           (target.isContentEditable || target.tagName === 'TEXTAREA' || target.tagName === 'INPUT');
         if (!editable || data === null) return;
-        const text = linkifyPlain(data.getData('text/plain'), data.getData('text/html'));
+        let source = data.getData('text/html') || '';
+        if (!/<a\b[^>]*href/i.test(source)) {
+          const rtf = data.getData('text/rtf') || data.getData('application/rtf') || '';
+          source = rtf === '' ? '' : rtfLinks(rtf).map(fieldToAnchor).join('');
+        }
+        const text = linkifyPlain(data.getData('text/plain'), source);
         if (text === undefined) return;
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -222,6 +338,7 @@ window.__ModuleLoader__.load({
       name: 'dsh-linkify',
       inject: ['slots', 'uiConversation'],
       linkifyPlain,
+      rtfLinks,
       apply(ctx) {
         ctx.uiConversation.userText.register(linkRule);
         ctx.slots.inject('conversation.user.text.node', function* () {

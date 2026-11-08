@@ -169,11 +169,37 @@ assert.equal(first.data.href, 'https://one.test');
 assert.equal(rule.match(text, first.end).data.href, 'https://two.test');
 
 // Chinese prose glued straight onto a URL stays prose: it must not enter the href.
+// Repeated label ("官网") with hidden a11y text: each anchor must take the next occurrence,
+// in document order, so no occurrence is left bare.
+const repeatedPlain = '明细见官网。结论：官网\n材料见官网，申请见官网';
+const repeatedHtml =
+  '<a href="https://e.test/1">官网<span class="sr">（在新窗口打开）</span></a>' +
+  '<a href="https://e.test/2">官网</a>' +
+  '<a href="https://e.test/3">官网<span class="sr">(opens in new tab)</span></a>' +
+  '<a href="https://e.test/4">官网</a>';
+assert.equal(
+  conv(repeatedPlain, repeatedHtml),
+  '明细见[官网](https://e.test/1)。结论：[官网](https://e.test/2)\n材料见[官网](https://e.test/3)，申请见[官网](https://e.test/4)',
+);
+
 const glued = '见 https://e.test/a现允许 GPA 3.0，另有 https://e.test/b明确不接受。';
 const gluedFirst = rule.match(glued, 0);
 assert.equal(gluedFirst.data.href, 'https://e.test/a');
 assert.equal(glued.slice(gluedFirst.start, gluedFirst.end), 'https://e.test/a');
 assert.equal(rule.match(glued, gluedFirst.end).data.href, 'https://e.test/b');
+
+// TextEdit/Pages/Word only put links in the RTF flavour: the field label must be re-attached.
+const rtfFixture = String.raw`{\rtf1\ansi\ansicpg936 {\field{\*\fldinst{HYPERLINK "https://e.test/a"}}{\fldrslt \ul \uc0\u30003 \u35831 \u26448 \u26009 }}\uc0\u65372 {\field{\*\fldinst{HYPERLINK "https://e.test/b"}}{\fldrslt \ul \uc0\u36153 \u29992 }}}`;
+const rtfFound = plugin.rtfLinks(rtfFixture);
+assert.deepEqual(rtfFound, [
+  { url: 'https://e.test/a', label: '申请材料' },
+  { url: 'https://e.test/b', label: '费用' },
+]);
+const rtfAnchors = rtfFound.map(({ url, label }) => `<a href="${url}">${label}</a>`).join('｜');
+assert.equal(
+  conv('申请材料｜费用', `<p>${rtfAnchors}</p>`),
+  '[申请材料](https://e.test/a)｜[费用](https://e.test/b)',
+);
 
 const node = { data: { href: 'https://x.test', label: 'X' } };
 const render = () => LinkText({ node, raw: '[X](https://x.test)', openExternal: (u) => clicks.push(u) });
