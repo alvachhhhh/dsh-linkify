@@ -90,6 +90,19 @@ assert.ok(rendered.table, 'table renderer registered');
   assert.ok(converted.includes('| 专业 | 学制 |\n| --- | --- |\n| 作曲 | 4 年 |\n| 音乐与社会 | 4 年 |'), converted);
   assert.ok(converted.startsWith('结论：\n') && converted.endsWith('\n以上'));
 
+  // The bubble draws tab-separated rows itself, so a paste that never got converted still shows a table.
+  const tabbed = '说明：\n专业\t学制\n作曲\t4 年\n以上';
+  const tabRule = plugin.tableRule.match(tabbed, 0);
+  assert.equal(tabRule && tabRule.id, 'table');
+  assert.deepEqual(tabRule.data.rows, [['专业', '学制'], ['作曲', '4 年']]);
+  assert.equal(tabRule.start, 4);
+  // Indented, ragged tab runs are pasted code, not a table.
+  assert.equal(plugin.tableRule.match('  a\tb\n  c\td', 0), undefined);
+  assert.equal(plugin.tableRule.match('a\tb\nc\td\te', 0), undefined);
+  // A clipboard with tabs but no <table> still converts (Excel for Mac can drop the HTML flavour).
+  assert.ok(plugin.linkifyPlain('专业\t学制\n作曲\t4 年', '').includes('| 专业 | 学制 |'));
+  assert.equal(plugin.linkifyPlain('  a\tb\n  c\td', ''), undefined, 'indented tabs left alone');
+
   // Cells keep their links clickable.
   const cell = TableText({
     node: { data: { rows: [['名称'], ['[官网](https://e.test/a)']] } },

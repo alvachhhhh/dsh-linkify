@@ -248,6 +248,24 @@ window.__ModuleLoader__.load({
           if (stop === -1) break;
           at = stop + 1;
         }
+        // Tab-separated rows (what Excel and every browser hand over) are a table too, so a paste
+        // that reached the composer as plain text still renders as one.
+        for (let i = 0; i + 1 < lines.length; i++) {
+          const first = lines[i].text;
+          if (!first.includes('\t') || /^[ \t]/u.test(first)) continue;
+          const width = first.split('\t').length;
+          if (width < 2) continue;
+          const rows = [];
+          let end = lines[i].start + first.length;
+          for (let j = i; j < lines.length; j++) {
+            const line = lines[j].text;
+            if (!line.includes('\t') || /^[ \t]/u.test(line) || line.split('\t').length !== width) break;
+            rows.push(line.split('\t').map((cell) => cell.trim()));
+            end = lines[j].start + line.length;
+          }
+          if (rows.length < 2) continue;
+          return { id: 'table', start: lines[i].start, end, data: { rows } };
+        }
         for (let i = 0; i + 1 < lines.length; i++) {
           const header = lines[i];
           const separator = lines[i + 1];
@@ -270,10 +288,13 @@ window.__ModuleLoader__.load({
       },
     };
 
-    // Office apps and every browser hand a copied table over as cells joined by tabs, so a run of
-    // tab-bearing lines becomes the pipe table above, which the bubble then draws as a table.
-    function tabTables(text) {
+    // Office apps hand a copied table over as cells joined by tabs — and Excel for Mac puts no
+    // <table> on the clipboard at all, so the shape of the text itself has to be the signal.
+    // Strict mode (no <table> in the HTML) also rejects indented lines and ragged tab counts, so a
+    // pasted code block keeps its tabs.
+    function tabTables(text, strict) {
       if (!text.includes('\t')) return text;
+      const cells = (line) => line.split('\t').length - 1;
       const lines = text.split('\n');
       const out = [];
       for (let i = 0; i < lines.length; i++) {
@@ -282,17 +303,30 @@ window.__ModuleLoader__.load({
           continue;
         }
         const run = [];
-        while (i < lines.length && lines[i].includes('\t')) run.push(lines[i++]);
+        const width = cells(lines[i]);
+        while (
+          i < lines.length &&
+          lines[i].includes('\t') &&
+          (!strict || (!/^[ \t]/u.test(lines[i]) && cells(lines[i]) === width))
+        ) {
+          run.push(lines[i++]);
+        }
+        // Strict mode can reject the very first line, leaving an empty run: keep the line and move
+        // on, or the rewound index would spin on it forever.
+        if (run.length === 0) {
+          out.push(lines[i]);
+          continue;
+        }
         i--;
         if (run.length < 2) {
           out.push(...run);
           continue;
         }
         const rows = run.map((line) => line.split('\t').map((cell) => cell.trim().replace(/\|/gu, '\\|')));
-        const width = Math.max(...rows.map((row) => row.length));
-        const pad = (row) => [...row, ...Array(width - row.length).fill('')];
+        const cols = Math.max(...rows.map((row) => row.length));
+        const pad = (row) => [...row, ...Array(cols - row.length).fill('')];
         const format = (row) => `| ${pad(row).join(' | ')} |`;
-        out.push(format(rows[0]), `| ${Array(width).fill('---').join(' | ')} |`, ...rows.slice(1).map(format));
+        out.push(format(rows[0]), `| ${Array(cols).fill('---').join(' | ')} |`, ...rows.slice(1).map(format));
       }
       return out.join('\n');
     }
@@ -340,12 +374,13 @@ window.__ModuleLoader__.load({
     function linkifyPlain(plain, html) {
       if (plain === '') return undefined;
       const linked = /<a\b[^>]*href/iu.test(html);
-      const table = /<table\b/iu.test(html);
+      const htmlTable = /<table\b/iu.test(html);
+      let text = tabTables(plain, !htmlTable);
+      const table = text !== plain;
       if (!linked && !table) return undefined;
-      let text = table ? tabTables(plain) : plain;
       let cursor = 0;
-      let changed = text !== plain;
-      if (!linked) return changed ? text : undefined;
+      let changed = table;
+      if (!linked) return text;
       const entries = [];
       for (const [, attrs, inner] of html.matchAll(ANCHOR)) {
         const href = HREF.exec(attrs);
