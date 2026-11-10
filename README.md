@@ -10,7 +10,8 @@ It also fixes a real problem: when you copy link-bearing text from a browser or 
 
 - `[label](https://…)` and bare `https://…` in a user message → underlined, clickable link
 - Pasting rich text with hyperlinks → converted to `[label](url)` on the way into the composer (inserted exactly once)
-- Pasting a table (copied from a page, Excel or Numbers) → its tab-separated rows become a pipe table, and the message bubble renders a real table with clickable cell links
+- Pasting a table (copied from a page, Excel or Numbers) → its tab-separated rows become a pipe table; the message bubble renders a real table with clickable cell links
+- A message that reaches the bubble as pipe rows *or* as consistent tab-separated rows still renders as a table, so the paste conversion is not required
 - The composer itself still shows markdown source — DSH's composer is a plain-text editor and cannot render links in place
 - Links in assistant replies are native DSH markdown and unrelated to this plugin
 
@@ -44,7 +45,7 @@ node --check client.js
 node check.mjs     # asserts, no test framework
 ```
 
-`check.mjs` covers rule matching, paste conversion, the paste listener, and the renderer's click behaviour.
+`check.mjs` covers rule matching, paste conversion, table recognition (pipe and tab rows), the paste listener, and the renderer's click behaviour.
 
 ## License
 
