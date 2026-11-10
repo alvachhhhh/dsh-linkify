@@ -228,6 +228,75 @@ window.__ModuleLoader__.load({
     const fieldToAnchor = ({ url, label }) =>
       `<a href="${url.replace(/"/g, '&quot;')}">${label.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</a>`;
 
+    // A pipe table the bubble can render: header row, a |---| separator, then body rows with
+    // the same column count. GFM's rules, no alignment attributes.
+    const TABLE_SEPARATOR = /^[ \t]*\|?[ \t]*:?-{1,}:?[ \t]*(\|[ \t]*:?-{1,}:?[ \t]*)+\|?[ \t]*$/u;
+
+    function splitCells(line) {
+      return line.trim().replace(/^\|/u, '').replace(/\|$/u, '').split('|').map((cell) => cell.trim());
+    }
+
+    const tableRule = {
+      id: 'table',
+      order: 10,
+      match(text, from) {
+        const lines = [];
+        for (let at = from; at <= text.length; ) {
+          const stop = text.indexOf('\n', at);
+          const end = stop === -1 ? text.length : stop;
+          lines.push({ start: at, text: text.slice(at, end) });
+          if (stop === -1) break;
+          at = stop + 1;
+        }
+        for (let i = 0; i + 1 < lines.length; i++) {
+          const header = lines[i];
+          const separator = lines[i + 1];
+          if (!header.text.includes('|') || !TABLE_SEPARATOR.test(separator.text)) continue;
+          const width = splitCells(separator.text).length;
+          const head = splitCells(header.text);
+          if (width < 2 || head.length !== width) continue;
+          const rows = [head];
+          let end = separator.start + separator.text.length;
+          for (let j = i + 2; j < lines.length; j++) {
+            const line = lines[j];
+            if (!line.text.includes('|')) break;
+            const body = splitCells(line.text);
+            if (body.length !== width) break;
+            rows.push(body);
+            end = line.start + line.text.length;
+          }
+          return { id: 'table', start: header.start, end, data: { rows } };
+        }
+      },
+    };
+
+    // Office apps and every browser hand a copied table over as cells joined by tabs, so a run of
+    // tab-bearing lines becomes the pipe table above, which the bubble then draws as a table.
+    function tabTables(text) {
+      if (!text.includes('\t')) return text;
+      const lines = text.split('\n');
+      const out = [];
+      for (let i = 0; i < lines.length; i++) {
+        if (!lines[i].includes('\t')) {
+          out.push(lines[i]);
+          continue;
+        }
+        const run = [];
+        while (i < lines.length && lines[i].includes('\t')) run.push(lines[i++]);
+        i--;
+        if (run.length < 2) {
+          out.push(...run);
+          continue;
+        }
+        const rows = run.map((line) => line.split('\t').map((cell) => cell.trim().replace(/\|/gu, '\\|')));
+        const width = Math.max(...rows.map((row) => row.length));
+        const pad = (row) => [...row, ...Array(width - row.length).fill('')];
+        const format = (row) => `| ${pad(row).join(' | ')} |`;
+        out.push(format(rows[0]), `| ${Array(width).fill('---').join(' | ')} |`, ...rows.slice(1).map(format));
+      }
+      return out.join('\n');
+    }
+
     // Labels copied from a page usually end up as one separator-joined run ("招生｜课程｜费用"),
     // not as prose. Searching for each label's first occurrence in order would then spend the
     // links on the same words inside the sentences ("申请资格", "毕业项目") and leave the run bare,
@@ -269,10 +338,14 @@ window.__ModuleLoader__.load({
     // Plain clipboard text + the anchors of its HTML twin → text whose linked labels became
     // [label](url). Returns undefined when there is nothing to re-attach.
     function linkifyPlain(plain, html) {
-      if (plain === '' || !/<a\b[^>]*href/iu.test(html)) return undefined;
-      let text = plain;
+      if (plain === '') return undefined;
+      const linked = /<a\b[^>]*href/iu.test(html);
+      const table = /<table\b/iu.test(html);
+      if (!linked && !table) return undefined;
+      let text = table ? tabTables(plain) : plain;
       let cursor = 0;
-      let changed = false;
+      let changed = text !== plain;
+      if (!linked) return changed ? text : undefined;
       const entries = [];
       for (const [, attrs, inner] of html.matchAll(ANCHOR)) {
         const href = HREF.exec(attrs);
@@ -369,6 +442,89 @@ window.__ModuleLoader__.load({
       cursor: 'pointer',
     };
 
+    // Links inside a table cell: the two syntaxes, inline, no block rules.
+    function inlineParts(text) {
+      const parts = [];
+      let last = 0;
+      for (;;) {
+        MARKDOWN_LINK.lastIndex = last;
+        const markdown = MARKDOWN_LINK.exec(text);
+        BARE_URL.lastIndex = last;
+        const bare = BARE_URL.exec(text);
+        const url = bare === null ? undefined : trimUrl(bare[0]);
+        const bareAt = url !== undefined && url.length > 'https://'.length ? bare.index : Infinity;
+        const markdownAt = markdown === null ? Infinity : markdown.index;
+        if (bareAt === Infinity && markdownAt === Infinity) break;
+        if (bareAt <= markdownAt) {
+          if (bareAt > last) parts.push(text.slice(last, bareAt));
+          parts.push({ href: url, label: url });
+          last = bareAt + url.length;
+        } else {
+          if (markdownAt > last) parts.push(text.slice(last, markdownAt));
+          parts.push({ href: markdown[2], label: markdown[1] });
+          last = markdownAt + markdown[0].length;
+        }
+      }
+      if (last < text.length) parts.push(text.slice(last));
+      return parts;
+    }
+
+    const CELL_STYLE = {
+      border: '1px solid rgba(128, 128, 128, 0.45)',
+      padding: '4px 10px',
+      textAlign: 'left',
+      verticalAlign: 'top',
+    };
+
+    function Cell({ text, header, open }) {
+      return h(
+        header ? 'th' : 'td',
+        { style: header ? { ...CELL_STYLE, fontWeight: 600 } : CELL_STYLE },
+        ...inlineParts(text).map((part, index) =>
+          typeof part === 'string'
+            ? part
+            : h(
+                'a',
+                {
+                  key: index,
+                  href: part.href,
+                  target: '_blank',
+                  rel: 'noopener noreferrer',
+                  style: LINK_STYLE,
+                  onClick(event) {
+                    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                    event.preventDefault();
+                    open(part.href);
+                  },
+                },
+                part.label,
+              ),
+        ),
+      );
+    }
+
+    function TableText({ node, openExternal: open }) {
+      const [header, ...body] = node.data.rows;
+      return h(
+        'div',
+        { style: { maxWidth: '100%', overflowX: 'auto' } },
+        h(
+          'table',
+          { style: { borderCollapse: 'collapse', margin: '6px 0', fontSize: '0.95em' } },
+          h('thead', null, h('tr', null, ...header.map((cell, index) => h(Cell, { key: index, text: cell, header: true, open })))),
+          body.length === 0
+            ? null
+            : h(
+                'tbody',
+                null,
+                ...body.map((row, rowIndex) =>
+                  h('tr', { key: rowIndex }, ...row.map((cell, index) => h(Cell, { key: index, text: cell, open }))),
+                ),
+              ),
+        ),
+      );
+    }
+
     function LinkText({ node, raw, openExternal: open }) {
       const { href, label } = node.data;
       return h(
@@ -394,16 +550,19 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'uiConversation'],
       linkifyPlain,
       rtfLinks,
+      tabTables,
+      tableRule,
       apply(ctx) {
+        ctx.uiConversation.userText.register(tableRule);
         ctx.uiConversation.userText.register(linkRule);
         ctx.slots.inject('conversation.user.text.node', function* () {
+          const inject = () => ({ openExternal: (url) => openExternal(ctx, url) });
           yield ctx.slots.register(
-            {
-              name: 'conversation.user.text.node',
-              key: 'link',
-              priority: 100,
-              inject: () => ({ openExternal: (url) => openExternal(ctx, url) }),
-            },
+            { name: 'conversation.user.text.node', key: 'table', priority: 100, inject },
+            TableText,
+          );
+          yield ctx.slots.register(
+            { name: 'conversation.user.text.node', key: 'link', priority: 100, inject },
             LinkText,
           );
         });

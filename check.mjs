@@ -6,6 +6,7 @@ const pasted = [];
 let rule;
 let LinkText;
 let plugin;
+const rendered = {};
 
 globalThis.window = {
   __ModuleLoader__: {
@@ -32,13 +33,14 @@ plugin.apply({
       for (const _ of fn()) void _;
     },
     register: (options, component) => {
-      assert.equal(options.key, 'link');
-      LinkText = component;
+      rendered[options.key] = component;
     },
   },
 });
 
+LinkText = rendered.link;
 assert.equal(rule.id, 'link');
+assert.ok(rendered.table, 'table renderer registered');
 
 // A separator-joined run carries the links; the same words inside the sentences must stay plain.
 {
@@ -60,6 +62,45 @@ assert.equal(rule.id, 'link');
   assert.ok(out?.includes('FAQ 却写'), 'prose FAQ stays plain');
   assert.ok(out?.includes('[项目](https://e.test/comp)｜[资格](https://e.test/qual)｜[FAQ](https://e.test/faq)'), 'run linked in order');
   assert.ok(out?.includes('[项目](https://e.test/audio)｜[当前申请要求](https://e.test/req)'), 'second run linked');
+}
+
+// Pipe tables: recognised in the text, drawn as a table, and produced from a tab-separated paste.
+{
+  const TableText = rendered.table;
+  const text = '说明如下\n| 专业 | 学制 |\n| --- | --- |\n| 作曲 | 4 年 |\n| 音乐与社会 | 4 年 |\n\n后续说明';
+  const table = plugin.tableRule.match(text, 0);
+  assert.equal(table.id, 'table');
+  assert.equal(table.start, 5);
+  assert.deepEqual(table.data.rows, [['专业', '学制'], ['作曲', '4 年'], ['音乐与社会', '4 年']]);
+  assert.equal(plugin.tableRule.match('没有表格 | 这里只有一条竖线', 0), undefined);
+  assert.equal(plugin.tableRule.match('| a | b |\n| --- |\n| 1 | 2 |', 0), undefined, 'ragged header rejected');
+
+  const opened = [];
+  const tree = TableText({ node: table, openExternal: (url) => opened.push(url) });
+  const [tableEl] = tree.children;
+  assert.equal(tableEl.type, 'table');
+  const head = tableEl.children[0];
+  assert.equal(head.type, 'thead');
+  const body = tableEl.children[1];
+  assert.equal(body.children.length, 2);
+
+  // A tab-separated clipboard block becomes a pipe table, so the bubble can draw it.
+  const plain = '结论：\n专业\t学制\n作曲\t4 年\n音乐与社会\t4 年\n以上';
+  const converted = plugin.linkifyPlain(plain, '<table><tr><td>专业</td><td>学制</td></tr></table>');
+  assert.ok(converted.includes('| 专业 | 学制 |\n| --- | --- |\n| 作曲 | 4 年 |\n| 音乐与社会 | 4 年 |'), converted);
+  assert.ok(converted.startsWith('结论：\n') && converted.endsWith('\n以上'));
+
+  // Cells keep their links clickable.
+  const cell = TableText({
+    node: { data: { rows: [['名称'], ['[官网](https://e.test/a)']] } },
+    openExternal: (url) => opened.push(url),
+  });
+  const grid = cell.children[0];
+  const td = grid.children[1].children[0].children[0];
+  const anchorEl = td.type(td.props).children[0];
+  assert.equal(anchorEl.type, 'a');
+  anchorEl.props.onClick({ button: 0, preventDefault: () => {} });
+  assert.deepEqual(opened, ['https://e.test/a']);
 }
 
 // The manifest must declare the DSH runtime it is registered against, or the manager installs it blind.
