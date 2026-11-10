@@ -90,6 +90,11 @@ assert.ok(rendered.table, 'table renderer registered');
   assert.ok(converted.includes('| 专业 | 学制 |\n| --- | --- |\n| 作曲 | 4 年 |\n| 音乐与社会 | 4 年 |'), converted);
   assert.ok(converted.startsWith('结论：\n') && converted.endsWith('\n以上'));
 
+  // Words glued to the header line stay prose; the grid starts at the first pipe.
+  const glued = plugin.tableRule.match('缺的表: | a | b |\n| --- | --- |\n| 1 | 2 |', 0);
+  assert.equal(glued && glued.start, 5);
+  assert.deepEqual(glued.data.rows, [['a', 'b'], ['1', '2']]);
+
   // The bubble draws tab-separated rows itself, so a paste that never got converted still shows a table.
   const tabbed = '说明：\n专业\t学制\n作曲\t4 年\n以上';
   const tabRule = plugin.tableRule.match(tabbed, 0);

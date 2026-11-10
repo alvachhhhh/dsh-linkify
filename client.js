@@ -271,7 +271,10 @@ window.__ModuleLoader__.load({
           const separator = lines[i + 1];
           if (!header.text.includes('|') || !TABLE_SEPARATOR.test(separator.text)) continue;
           const width = splitCells(separator.text).length;
-          const head = splitCells(header.text);
+          // Prose glued to the header ("缺的表: | 路径 | …") is not part of the table: the grid
+          // starts at the first cell, and the words in front of it stay plain text.
+          const lead = header.text.indexOf('|');
+          const head = splitCells(header.text.slice(lead));
           if (width < 2 || head.length !== width) continue;
           const rows = [head];
           let end = separator.start + separator.text.length;
@@ -283,7 +286,7 @@ window.__ModuleLoader__.load({
             rows.push(body);
             end = line.start + line.text.length;
           }
-          return { id: 'table', start: header.start, end, data: { rows } };
+          return { id: 'table', start: header.start + lead, end, data: { rows } };
         }
       },
     };
